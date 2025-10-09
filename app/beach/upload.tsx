@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   View,
   Text,
@@ -7,6 +7,8 @@ import {
   ActivityIndicator,
   Alert,
   TextInput,
+  Image,
+  ScrollView,
 } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import * as VideoThumbnails from "expo-video-thumbnails";
@@ -14,12 +16,38 @@ import * as FileSystem from "expo-file-system/legacy";
 import { supabase } from "../../lib/supabase";
 import { decode } from "base64-arraybuffer";
 import { useLocalSearchParams, useRouter } from "expo-router";
+import { Feather } from "@expo/vector-icons";
 
 export default function UploadVideo() {
   const router = useRouter();
   const { beachId } = useLocalSearchParams<{ beachId?: string }>();
+
+  const [beachName, setBeachName] = useState<string | null>(null);
   const [caption, setCaption] = useState("");
   const [uploading, setUploading] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [thumbUri, setThumbUri] = useState<string | null>(null);
+  const [videoUri, setVideoUri] = useState<string | null>(null);
+  const [stage, setStage] = useState<"pick" | "preview" | "upload">("pick");
+
+  // 👋 Mock profile info (you can later replace with supabase user)
+  const userName = "Arsalan";
+  const userAvatar = "https://randomuser.me/api/portraits/men/1.jpg";
+
+  // Fetch beach name for clarity
+  useEffect(() => {
+    const fetchBeach = async () => {
+      if (!beachId) return;
+      const { data, error } = await supabase
+        .from("beaches")
+        .select("formal_name")
+        .eq("id", beachId)
+        .single();
+      if (error) console.error("Beach fetch error:", error);
+      else setBeachName(data?.formal_name);
+    };
+    fetchBeach();
+  }, [beachId]);
 
   // 🧩 Ensure folder exists (or create placeholder file)
   const ensureFolder = async (path: string) => {
@@ -39,154 +67,238 @@ export default function UploadVideo() {
     }
   };
 
+  // 🎥 Pick a video
+  const pickVideo = async () => {
+    try {
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Videos,
+        allowsEditing: true,
+        quality: 0.7,
+      });
+      if (result.canceled) return;
+
+      const selectedUri = result.assets[0].uri;
+      setVideoUri(selectedUri);
+
+      const { uri: thumb } = await VideoThumbnails.getThumbnailAsync(selectedUri, {
+        time: 1000,
+      });
+      setThumbUri(thumb);
+      setStage("preview");
+    } catch (error) {
+      console.error("Pick video error:", error);
+      Alert.alert("Error", "Failed to pick video");
+    }
+  };
+
+  // ☁️ Upload video
   const uploadVideo = async () => {
-  try {
-    setUploading(true);
+    try {
+      if (!videoUri) return;
+      setUploading(true);
+      setProgress(10);
 
-    // 🎥 Pick a video
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Videos,
-      allowsEditing: true,
-      quality: 0.7,
-    });
+      const fileInfo = await FileSystem.getInfoAsync(videoUri);
+      const sizeMB = (fileInfo as any).size
+        ? (fileInfo as any).size / (1024 * 1024)
+        : 0;
 
-    if (result.canceled) {
-      setUploading(false);
-      return;
-    }
+      if (sizeMB > 50) {
+        Alert.alert("Too Large", "Please choose a video smaller than 50MB.");
+        setUploading(false);
+        return;
+      }
 
-    const videoUri = result.assets[0].uri;
+      const {
+        data: { user },
+        error: userError,
+      } = await supabase.auth.getUser();
+      if (userError || !user) throw new Error("You must be logged in to upload.");
 
-    // 🎞️ Generate a thumbnail
-    const { uri: thumbUri } = await VideoThumbnails.getThumbnailAsync(videoUri, {
-      time: 1000,
-    });
+      const userId = user.id;
+      const videoId = Math.random().toString(36).substring(2, 10);
 
-    // 📏 Get file info
-    const fileInfo = await FileSystem.getInfoAsync(videoUri);
-    const sizeMB = (fileInfo as any).size ? (fileInfo as any).size / (1024 * 1024) : 0;
+      await ensureFolder(beachId as string);
+      await ensureFolder(`${beachId}/${userId}`);
+      setProgress(25);
 
-    if (sizeMB > 50) {
-      Alert.alert("Too Large", "Please choose a video smaller than 50MB.");
-      setUploading(false);
-      return;
-    }
-
-    // 👤 Current user
-    const {
-      data: { user },
-      error: userError,
-    } = await supabase.auth.getUser();
-    if (userError || !user) throw new Error("You must be logged in to upload.");
-
-    const userId = user.id;
-    const videoId = Math.random().toString(36).substring(2, 10);
-
-    // 📁 Ensure folders exist
-    await ensureFolder(beachId as string);
-    await ensureFolder(`${beachId}/${userId}`);
-
-    // 🧠 Read and convert files
-    const videoBase64 = await FileSystem.readAsStringAsync(videoUri, { encoding: "base64" });
-    const thumbBase64 = await FileSystem.readAsStringAsync(thumbUri, { encoding: "base64" });
-
-    // ✅ Convert safely to ArrayBuffer
-    const base64ToArrayBuffer = (base64: string): ArrayBuffer => {
-    const binary = global.atob(base64);
-    const len = binary.length;
-    const bytes = new Uint8Array(len);
-    for (let i = 0; i < len; i++) {
-        bytes[i] = binary.charCodeAt(i);
-    }
-    return bytes.buffer;
-    };
-
-    const videoBuffer = decode(videoBase64);
-
-    const thumbBuffer = base64ToArrayBuffer(thumbBase64);
-
-
-    // 🗂️ Paths
-    const videoPath = `${beachId}/${userId}/${videoId}.mp4`;
-    const thumbPath = `${beachId}/${userId}/${videoId}_thumb.jpg`;
-
-    // ☁️ Upload video
-    const { error: uploadError } = await supabase.storage
-      .from("videos")
-      .upload(videoPath, videoBuffer, {
-        contentType: "video/mp4",
+      const videoBase64 = await FileSystem.readAsStringAsync(videoUri, {
+        encoding: "base64",
       });
-    if (uploadError) throw uploadError;
+      const thumbBase64 = thumbUri
+        ? await FileSystem.readAsStringAsync(thumbUri, { encoding: "base64" })
+        : "";
 
-    // ☁️ Upload thumbnail
-    const { error: thumbError } = await supabase.storage
-      .from("videos")
-      .upload(thumbPath, thumbBuffer, {
-        contentType: "image/jpeg",
+      const base64ToArrayBuffer = (base64: string): ArrayBuffer => {
+        const binary = global.atob(base64);
+        const len = binary.length;
+        const bytes = new Uint8Array(len);
+        for (let i = 0; i < len; i++) bytes[i] = binary.charCodeAt(i);
+        return bytes.buffer;
+      };
+
+      const videoBuffer = decode(videoBase64);
+      const thumbBuffer = thumbBase64 ? base64ToArrayBuffer(thumbBase64) : new ArrayBuffer(0);
+
+      setProgress(50);
+
+      const videoPath = `${beachId}/${userId}/${videoId}.mp4`;
+      const thumbPath = `${beachId}/${userId}/${videoId}_thumb.jpg`;
+
+      const { error: videoError } = await supabase.storage
+        .from("videos")
+        .upload(videoPath, videoBuffer, { contentType: "video/mp4" });
+      if (videoError) throw videoError;
+      setProgress(75);
+
+      if (thumbUri) {
+        const { error: thumbError } = await supabase.storage
+          .from("videos")
+          .upload(thumbPath, thumbBuffer, { contentType: "image/jpeg" });
+        if (thumbError) throw thumbError;
+      }
+
+      const { data: videoPublic } = supabase.storage
+        .from("videos")
+        .getPublicUrl(videoPath);
+      const { data: thumbPublic } = supabase.storage
+        .from("videos")
+        .getPublicUrl(thumbPath);
+
+      const { error: dbError } = await supabase.from("videos").insert({
+        beach_id: beachId,
+        user_id: userId,
+        video_url: videoPublic.publicUrl,
+        thumbnail_url: thumbPublic.publicUrl,
+        caption,
+        duration_seconds: 20,
+        size_mb: sizeMB.toFixed(2),
+        mime_type: "video/mp4",
+        approved: true,
       });
-    if (thumbError) throw thumbError;
+      if (dbError) throw dbError;
 
-    // 🌍 Public URLs
-    const { data: videoPublic } = supabase.storage.from("videos").getPublicUrl(videoPath);
-    const { data: thumbPublic } = supabase.storage.from("videos").getPublicUrl(thumbPath);
-
-    // 🗄️ Insert into DB
-    const { error: dbError } = await supabase.from("videos").insert({
-      beach_id: beachId,
-      user_id: userId,
-      video_url: videoPublic.publicUrl,
-      thumbnail_url: thumbPublic.publicUrl,
-      caption,
-      duration_seconds: 20,
-      size_mb: sizeMB.toFixed(2),
-      mime_type: "video/mp4",
-      approved: true,
-    });
-
-    if (dbError) throw dbError;
-
-    Alert.alert("✅ Success", "Your video has been uploaded!");
-    setCaption("");
-  } catch (error: any) {
-    console.error("Upload error:", error);
-    Alert.alert("Upload failed", error.message || "Something went wrong");
-  } finally {
-    setUploading(false);
-  }
-};
-
+      setProgress(100);
+      Alert.alert("✅ Success", "Your video has been uploaded!");
+      setCaption("");
+      setStage("pick");
+      router.back();
+    } catch (error: any) {
+      console.error("Upload error:", error);
+      Alert.alert("Upload failed", error.message || "Something went wrong");
+    } finally {
+      setUploading(false);
+    }
+  };
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.header}>🎥 Upload Surf Video</Text>
+    <ScrollView style={styles.container}>
+      {/* Header (same as home) */}
+      <View style={styles.header}>
+        <View>
+          <Text style={styles.greeting}>Hi, {userName} 👋</Text>
+          <Text style={styles.subtext}>Upload your surf video</Text>
+        </View>
+        <Image source={{ uri: userAvatar }} style={styles.avatar} />
+      </View>
 
-      <TextInput
-        style={styles.input}
-        placeholder="Write a caption..."
-        placeholderTextColor="#aaa"
-        value={caption}
-        onChangeText={setCaption}
-        multiline
-      />
+      {/* Beach Info */}
+      <View style={styles.beachInfo}>
+        <Feather name="map-pin" size={18} color="#0077b6" />
+        <Text style={styles.beachName}>
+          {beachName ? `Uploading to: ${beachName}` : "Loading beach..."}
+        </Text>
+      </View>
 
-      <TouchableOpacity
-        style={[styles.button, uploading && { opacity: 0.6 }]}
-        onPress={uploadVideo}
-        disabled={uploading}
-      >
-        {uploading ? (
-          <ActivityIndicator color="#fff" />
-        ) : (
-          <Text style={styles.buttonText}>Upload Video</Text>
-        )}
-      </TouchableOpacity>
-    </View>
+      {/* Content */}
+      {stage === "pick" && (
+        <View style={styles.pickSection}>
+          <TouchableOpacity style={styles.pickButton} onPress={pickVideo}>
+            <Feather name="video" size={36} color="#0077b6" />
+            <Text style={styles.pickText}>Choose a video to upload</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
+      {stage === "preview" && (
+        <View style={styles.previewSection}>
+          {thumbUri && (
+            <View style={styles.previewContainer}>
+              <Image source={{ uri: thumbUri }} style={styles.thumbnail} />
+              <Text style={styles.previewText}>Preview</Text>
+            </View>
+          )}
+          <TextInput
+            style={styles.input}
+            placeholder="Write a caption..."
+            placeholderTextColor="#aaa"
+            value={caption}
+            onChangeText={setCaption}
+            multiline
+          />
+          <TouchableOpacity
+            style={styles.uploadButton}
+            onPress={uploadVideo}
+            disabled={uploading}
+          >
+            {uploading ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <Text style={styles.uploadButtonText}>Upload Video</Text>
+            )}
+          </TouchableOpacity>
+        </View>
+      )}
+
+      {uploading && (
+        <View style={styles.progressBox}>
+          <ActivityIndicator size="large" color="#0077b6" />
+          <Text style={styles.progressText}>
+            Uploading... {progress.toFixed(0)}%
+          </Text>
+        </View>
+      )}
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#f9fbfd", padding: 20, paddingTop: 60 },
-  header: { fontSize: 22, fontWeight: "bold", color: "#023e8a", marginBottom: 20 },
+  container: { flex: 1, backgroundColor: "#f9fbfd", paddingHorizontal: 20 },
+  header: {
+    marginTop: 60,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+  greeting: { fontSize: 24, fontWeight: "bold", color: "#023e8a" },
+  subtext: { color: "#666", marginTop: 4 },
+  avatar: { width: 48, height: 48, borderRadius: 24 },
+  beachInfo: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#fff",
+    borderRadius: 12,
+    padding: 12,
+    marginTop: 20,
+    shadowColor: "#000",
+    shadowOpacity: 0.05,
+    shadowRadius: 5,
+    elevation: 3,
+  },
+  beachName: { marginLeft: 8, color: "#023e8a", fontWeight: "600" },
+  pickSection: { marginTop: 50, alignItems: "center" },
+  pickButton: {
+    backgroundColor: "#fff",
+    borderRadius: 16,
+    padding: 40,
+    alignItems: "center",
+    shadowColor: "#000",
+    shadowOpacity: 0.1,
+    shadowRadius: 6,
+    elevation: 4,
+  },
+  pickText: { color: "#0077b6", marginTop: 10, fontSize: 16 },
+  previewSection: { marginTop: 30 },
   input: {
     backgroundColor: "#fff",
     borderRadius: 12,
@@ -197,11 +309,25 @@ const styles = StyleSheet.create({
     color: "#333",
     marginBottom: 20,
   },
-  button: {
+  uploadButton: {
     backgroundColor: "#0077b6",
     paddingVertical: 14,
     borderRadius: 12,
     alignItems: "center",
   },
-  buttonText: { color: "#fff", fontSize: 16, fontWeight: "600" },
+  uploadButtonText: { color: "#fff", fontSize: 16, fontWeight: "600" },
+  previewContainer: { alignItems: "center", marginBottom: 20 },
+  thumbnail: {
+    width: 240,
+    height: 140,
+    borderRadius: 12,
+    marginBottom: 8,
+  },
+  previewText: { color: "#555" },
+  progressBox: {
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: 40,
+  },
+  progressText: { color: "#0077b6", fontSize: 16, marginTop: 8 },
 });
