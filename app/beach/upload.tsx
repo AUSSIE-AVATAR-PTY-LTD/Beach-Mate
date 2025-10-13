@@ -17,6 +17,8 @@ import { supabase } from "../../lib/supabase";
 import { decode } from "base64-arraybuffer";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { Feather } from "@expo/vector-icons";
+import AppHeader from "../../componenets/AppHeader";
+
 
 export default function UploadVideo() {
   const router = useRouter();
@@ -29,12 +31,26 @@ export default function UploadVideo() {
   const [thumbUri, setThumbUri] = useState<string | null>(null);
   const [videoUri, setVideoUri] = useState<string | null>(null);
   const [stage, setStage] = useState<"pick" | "preview" | "upload">("pick");
+  const [user, setUser] = useState<any>(null);
+  const [loadingUser, setLoadingUser] = useState(true);
 
-  // 👋 Mock profile info (you can later replace with supabase user)
-  const userName = "Arsalan";
-  const userAvatar = "https://randomuser.me/api/portraits/men/1.jpg";
+  const userName = user?.user_metadata?.full_name || "Guest";
+  const userAvatar =
+    user?.user_metadata?.avatar_url || "https://randomuser.me/api/portraits/men/1.jpg";
 
-  // Fetch beach name for clarity
+  // 🔐 Check user session
+  useEffect(() => {
+    const fetchUser = async () => {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      setUser(user);
+      setLoadingUser(false);
+    };
+    fetchUser();
+  }, []);
+
+  // Fetch beach name
   useEffect(() => {
     const fetchBeach = async () => {
       if (!beachId) return;
@@ -91,10 +107,42 @@ export default function UploadVideo() {
     }
   };
 
-  // ☁️ Upload video
+  // 📸 Record video
+  const recordVideo = async () => {
+    try {
+      const permission = await ImagePicker.requestCameraPermissionsAsync();
+      if (!permission.granted) {
+        Alert.alert("Permission Required", "Camera permission is needed to record videos.");
+        return;
+      }
+
+      const result = await ImagePicker.launchCameraAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Videos,
+        allowsEditing: true,
+        videoExportPreset: ImagePicker.VideoExportPreset.MediumQuality,
+        quality: 0.7,
+      });
+
+      if (result.canceled) return;
+
+      const recordedUri = result.assets[0].uri;
+      setVideoUri(recordedUri);
+
+      const { uri: thumb } = await VideoThumbnails.getThumbnailAsync(recordedUri, {
+        time: 1000,
+      });
+      setThumbUri(thumb);
+      setStage("preview");
+    } catch (error) {
+      console.error("Record video error:", error);
+      Alert.alert("Error", "Failed to record video");
+    }
+  };
+
+  // ☁️ Upload
   const uploadVideo = async () => {
     try {
-      if (!videoUri) return;
+      if (!videoUri || !user) return;
       setUploading(true);
       setProgress(10);
 
@@ -108,12 +156,6 @@ export default function UploadVideo() {
         setUploading(false);
         return;
       }
-
-      const {
-        data: { user },
-        error: userError,
-      } = await supabase.auth.getUser();
-      if (userError || !user) throw new Error("You must be logged in to upload.");
 
       const userId = user.id;
       const videoId = Math.random().toString(36).substring(2, 10);
@@ -191,13 +233,38 @@ export default function UploadVideo() {
     }
   };
 
+  // Loading state while checking auth
+  if (loadingUser) {
+    return (
+      <View style={styles.center}>
+        <ActivityIndicator size="large" color="#0077b6" />
+      </View>
+    );
+  }
+
+  // 🚫 Not logged in
+  if (!user) {
+    return (
+      <View style={styles.center}>
+        <Feather name="lock" size={64} color="#0077b6" />
+        <Text style={styles.lockText}>You must be logged in to upload videos.</Text>
+        <TouchableOpacity
+          style={styles.loginButton}
+          onPress={() => router.push("/auth/login")}
+        >
+          <Text style={styles.loginText}>Login to Continue</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
   return (
     <ScrollView style={styles.container}>
-      {/* Header (same as home) */}
+      {/* Header */}
       <View style={styles.header}>
         <View>
           <Text style={styles.greeting}>Hi, {userName} 👋</Text>
-          <Text style={styles.subtext}>Upload your surf video</Text>
+          <Text style={styles.subtext}>Share your latest surf session</Text>
         </View>
         <Image source={{ uri: userAvatar }} style={styles.avatar} />
       </View>
@@ -210,16 +277,22 @@ export default function UploadVideo() {
         </Text>
       </View>
 
-      {/* Content */}
+      {/* Pick / Record Options */}
       {stage === "pick" && (
         <View style={styles.pickSection}>
-          <TouchableOpacity style={styles.pickButton} onPress={pickVideo}>
-            <Feather name="video" size={36} color="#0077b6" />
-            <Text style={styles.pickText}>Choose a video to upload</Text>
+          <TouchableOpacity style={styles.optionButton} onPress={pickVideo}>
+            <Feather name="folder" size={28} color="#0077b6" />
+            <Text style={styles.optionText}>Pick from Gallery</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.optionButton} onPress={recordVideo}>
+            <Feather name="camera" size={28} color="#0077b6" />
+            <Text style={styles.optionText}>Record a Video</Text>
           </TouchableOpacity>
         </View>
       )}
 
+      {/* Preview + Caption */}
       {stage === "preview" && (
         <View style={styles.previewSection}>
           {thumbUri && (
@@ -230,7 +303,7 @@ export default function UploadVideo() {
           )}
           <TextInput
             style={styles.input}
-            placeholder="Write a caption..."
+            placeholder="Add a caption..."
             placeholderTextColor="#aaa"
             value={caption}
             onChangeText={setCaption}
@@ -250,6 +323,7 @@ export default function UploadVideo() {
         </View>
       )}
 
+      {/* Upload Progress */}
       {uploading && (
         <View style={styles.progressBox}>
           <ActivityIndicator size="large" color="#0077b6" />
@@ -286,18 +360,25 @@ const styles = StyleSheet.create({
     elevation: 3,
   },
   beachName: { marginLeft: 8, color: "#023e8a", fontWeight: "600" },
-  pickSection: { marginTop: 50, alignItems: "center" },
-  pickButton: {
+  pickSection: {
+    marginTop: 50,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  optionButton: {
     backgroundColor: "#fff",
     borderRadius: 16,
-    padding: 40,
+    paddingVertical: 25,
+    paddingHorizontal: 50,
+    marginVertical: 10,
     alignItems: "center",
+    width: "90%",
     shadowColor: "#000",
     shadowOpacity: 0.1,
     shadowRadius: 6,
     elevation: 4,
   },
-  pickText: { color: "#0077b6", marginTop: 10, fontSize: 16 },
+  optionText: { color: "#0077b6", marginTop: 10, fontSize: 16 },
   previewSection: { marginTop: 30 },
   input: {
     backgroundColor: "#fff",
@@ -330,4 +411,20 @@ const styles = StyleSheet.create({
     marginTop: 40,
   },
   progressText: { color: "#0077b6", fontSize: 16, marginTop: 8 },
+  center: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "#f9fbfd",
+    padding: 20,
+  },
+  lockText: { color: "#023e8a", fontSize: 18, textAlign: "center", marginTop: 10 },
+  loginButton: {
+    marginTop: 20,
+    backgroundColor: "#0077b6",
+    borderRadius: 10,
+    paddingVertical: 12,
+    paddingHorizontal: 30,
+  },
+  loginText: { color: "#fff", fontSize: 16, fontWeight: "600" },
 });
