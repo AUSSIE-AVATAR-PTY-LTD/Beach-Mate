@@ -17,7 +17,7 @@ import { supabase } from "../../lib/supabase";
 import { decode } from "base64-arraybuffer";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { Feather } from "@expo/vector-icons";
-import AppHeader from "../../componenets/AppHeader";
+import AppHeader from "../../components/AppHeader";
 
 
 export default function UploadVideo() {

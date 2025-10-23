@@ -3,22 +3,22 @@ import {
   View,
   Text,
   StyleSheet,
-  Image,
-  TextInput,
-  Pressable,
   ImageBackground,
   Dimensions,
   ActivityIndicator,
   FlatList,
+  Pressable,
+  TextInput,
 } from "react-native";
 import { Feather } from "@expo/vector-icons";
 import * as Location from "expo-location";
 import { supabase } from "../../lib/supabase";
 import { LinearGradient } from "expo-linear-gradient";
 import { Link } from "expo-router";
+import AppHeader from "../../components/AppHeader";
 
 const { width } = Dimensions.get("window");
-const PAGE_SIZE = 10; // number of beaches to load per page
+const PAGE_SIZE = 10;
 
 type Beach = {
   id: string;
@@ -67,15 +67,14 @@ export default function HomeScreen() {
         .range(from, to);
 
       if (error) throw error;
-
       if (!data || data.length === 0) {
         setHasMore(false);
         return;
       }
 
+      // Calculate distances + weather
       const updated = await Promise.all(
         data.map(async (b) => {
-          // Distance
           const R = 6371;
           const dLat = ((b.latitude - userLat) * Math.PI) / 180;
           const dLon = ((b.longitude - userLon) * Math.PI) / 180;
@@ -87,7 +86,6 @@ export default function HomeScreen() {
           const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
           const distance = R * c;
 
-          // Weather (simple, light API)
           try {
             const res = await fetch(
               `https://api.open-meteo.com/v1/forecast?latitude=${b.latitude}&longitude=${b.longitude}&current=temperature_2m,wind_speed_10m`
@@ -102,7 +100,6 @@ export default function HomeScreen() {
         })
       );
 
-      // Merge + sort by distance
       setBeaches((prev) =>
         [...prev, ...updated].sort(
           (a, b) => (a.distance ?? 0) - (b.distance ?? 0)
@@ -130,39 +127,19 @@ export default function HomeScreen() {
     }
   };
 
-  if (loading && beaches.length === 0) {
-    return (
-      <View style={styles.center}>
-        <ActivityIndicator size="large" color="#0077b6" />
-        <Text style={styles.text}>Loading nearby beaches...</Text>
-      </View>
-    );
-  }
-
   return (
     <View style={styles.container}>
-      {/* Header */}
-      <View style={styles.header}>
-        <View>
-          <Text style={styles.greeting}>Hi, Arsalan 👋</Text>
-          <Text style={styles.subtext}>Find your perfect wave</Text>
-        </View>
-        <Image
-          source={{ uri: "https://randomuser.me/api/portraits/men/1.jpg" }}
-          style={styles.avatar}
-        />
-      </View>
+      {/* 🌊 Header always visible */}
+      <AppHeader subtitle="Find your perfect wave" />
 
-      {/* Search */}
+      {/* 🔍 Search Bar */}
       <View style={styles.searchContainer}>
         <Feather name="search" size={20} color="#999" />
         <TextInput placeholder="Search beaches..." style={styles.searchInput} />
-        <Pressable>
-          <Feather name="sliders" size={20} color="#0077b6" />
-        </Pressable>
+        <Feather name="sliders" size={20} color="#0077b6" />
       </View>
 
-      {/* Filters */}
+      {/* Filter Tabs */}
       <View style={styles.filterTabs}>
         {["Popular", "Nearby", "Latest"].map((tab) => (
           <Pressable
@@ -185,81 +162,98 @@ export default function HomeScreen() {
         ))}
       </View>
 
-      {/* Beaches list */}
-      <FlatList
-        data={beaches}
-        keyExtractor={(item) => item.id}
-        renderItem={({ item }) => (
-          <Link key={item.id} href={`/beach/${item.id}`} asChild>
-            <Pressable style={({ pressed }) => [{ opacity: pressed ? 0.9 : 1 }]}>
-              <ImageBackground
-                source={{
-                  uri:
-                    "https://images.unsplash.com/photo-1507525428034-b723cf961d3e?auto=format&fit=crop&w=1000&q=80",
-                }}
-                style={styles.card}
-                imageStyle={{ borderRadius: 20 }}
-              >
-                <LinearGradient
-                  colors={["transparent", "rgba(0,0,0,0.6)"]}
-                  style={styles.gradient}
-                />
-                <View style={styles.weatherBadge}>
-                  <Feather name="thermometer" size={14} color="#fff" />
-                  <Text style={styles.weatherText}>
-                    {item.weather?.temp?.toFixed(1)}°C
-                  </Text>
-                  <Feather name="wind" size={14} color="#fff" style={{ marginLeft: 6 }} />
-                  <Text style={styles.weatherText}>
-                    {item.weather?.wind?.toFixed(1)} m/s
-                  </Text>
-                </View>
+      {/* 🏖️ Beaches Section */}
+      <View style={styles.beachesSection}>
+        {loading && beaches.length === 0 ? (
+          <View style={styles.centeredLoader}>
+            <ActivityIndicator size="large" color="#0077b6" />
+            <Text style={styles.loadingText}>Loading nearby beaches...</Text>
+          </View>
+        ) : beaches.length === 0 ? (
+          <View style={styles.centeredLoader}>
+            <Feather name="alert-circle" size={28} color="#999" />
+            <Text style={styles.loadingText}>No beaches found nearby.</Text>
+          </View>
+        ) : (
+          <FlatList
+            data={beaches}
+            keyExtractor={(item) => item.id}
+            renderItem={({ item }) => (
+              <Link key={item.id} href={`/beach/${item.id}`} asChild>
+                <Pressable
+                  style={({ pressed }) => [{ opacity: pressed ? 0.9 : 1 }]}
+                >
+                  <ImageBackground
+                    source={{
+                      uri:
+                        "https://images.unsplash.com/photo-1507525428034-b723cf961d3e?auto=format&fit=crop&w=1000&q=80",
+                    }}
+                    style={styles.card}
+                    imageStyle={{ borderRadius: 20 }}
+                  >
+                    <LinearGradient
+                      colors={["transparent", "rgba(0,0,0,0.6)"]}
+                      style={styles.gradient}
+                    />
 
-                <View style={styles.cardText}>
-                  <Text style={styles.cardTitle}>{item.formal_name}</Text>
-                  {item.local_name && (
-                    <Text style={styles.cardSubtitle}>
-                      Also known as {item.local_name}
-                    </Text>
-                  )}
-                  <View style={styles.cardFooter}>
-                    <Feather name="map-pin" size={14} color="#fff" />
-                    <Text style={styles.cardDistance}>
-                      {item.distance?.toFixed(1)} km away
-                    </Text>
-                  </View>
-                </View>
-              </ImageBackground>
-            </Pressable>
-          </Link>
+                    {/* Weather Badge */}
+                    <View style={styles.weatherBadge}>
+                      <Feather name="thermometer" size={14} color="#fff" />
+                      <Text style={styles.weatherText}>
+                        {item.weather?.temp?.toFixed(1)}°C
+                      </Text>
+                      <Feather
+                        name="wind"
+                        size={14}
+                        color="#fff"
+                        style={{ marginLeft: 6 }}
+                      />
+                      <Text style={styles.weatherText}>
+                        {item.weather?.wind?.toFixed(1)} m/s
+                      </Text>
+                    </View>
+
+                    {/* Info Text */}
+                    <View style={styles.cardText}>
+                      <Text style={styles.cardTitle}>{item.formal_name}</Text>
+                      {item.local_name && (
+                        <Text style={styles.cardSubtitle}>
+                          Also known as {item.local_name}
+                        </Text>
+                      )}
+                      <View style={styles.cardFooter}>
+                        <Feather name="map-pin" size={14} color="#fff" />
+                        <Text style={styles.cardDistance}>
+                          {item.distance?.toFixed(1)} km away
+                        </Text>
+                      </View>
+                    </View>
+                  </ImageBackground>
+                </Pressable>
+              </Link>
+            )}
+            onEndReached={loadMore}
+            onEndReachedThreshold={0.5}
+            ListFooterComponent={
+              loadingMore ? (
+                <ActivityIndicator
+                  size="small"
+                  color="#0077b6"
+                  style={{ margin: 20 }}
+                />
+              ) : null
+            }
+            showsVerticalScrollIndicator={false}
+            contentContainerStyle={{ paddingBottom: 100 }}
+          />
         )}
-        onEndReached={loadMore}
-        onEndReachedThreshold={0.5}
-        ListFooterComponent={
-          loadingMore ? (
-            <ActivityIndicator size="small" color="#0077b6" style={{ margin: 20 }} />
-          ) : null
-        }
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingBottom: 100 }}
-      />
+      </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#f9fbfd", paddingHorizontal: 20 },
-  center: { flex: 1, justifyContent: "center", alignItems: "center" },
-  text: { marginTop: 10, color: "#555" },
-  header: {
-    marginTop: 60,
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-  },
-  greeting: { fontSize: 24, fontWeight: "bold", color: "#023e8a" },
-  subtext: { color: "#666", marginTop: 4 },
-  avatar: { width: 48, height: 48, borderRadius: 24 },
   searchContainer: {
     marginTop: 20,
     flexDirection: "row",
@@ -288,6 +282,14 @@ const styles = StyleSheet.create({
   filterButtonActive: { backgroundColor: "#0077b6" },
   filterText: { color: "#0077b6", fontWeight: "500" },
   filterTextActive: { color: "#fff" },
+  beachesSection: { flex: 1, marginTop: 15 },
+  centeredLoader: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    paddingVertical: 100,
+  },
+  loadingText: { color: "#555", marginTop: 10 },
   card: {
     width: width - 40,
     height: 230,

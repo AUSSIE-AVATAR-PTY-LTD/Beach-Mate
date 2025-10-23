@@ -15,6 +15,7 @@ import { supabase } from "../../lib/supabase";
 import { LinearGradient } from "expo-linear-gradient";
 import { Feather } from "@expo/vector-icons";
 import * as Font from "expo-font";
+import AppHeader from "../../components/AppHeader"; // ✅ Import header
 
 const { width } = Dimensions.get("window");
 
@@ -80,17 +81,17 @@ export default function BeachDetails() {
           });
         }
 
-        // 🎥 Fetch approved videos for this beach
+        // 🎥 Fetch approved videos
         const beachUUID = Array.isArray(id) ? id[0].trim() : (id ?? "").trim();
         console.log("Querying videos for beach ID:", beachUUID);
 
         const { data: videoData, error: videoError } = await supabase
           .from("videos")
           .select("*")
-          .eq("beach_id", beachUUID) // ✅ exact UUID comparison
+          .eq("beach_id", beachUUID)
           .eq("approved", true)
           .order("created_at", { ascending: false });
-          
+
         if (videoError) throw videoError;
         console.log("Fetched videos:", videoData);
         setVideos(videoData || []);
@@ -137,7 +138,11 @@ export default function BeachDetails() {
 
   return (
     <View style={styles.container}>
+      {/* 🌊 Dynamic Header */}
+      <AppHeader subtitle="Explore surf conditions & videos" />
+
       <ScrollView showsVerticalScrollIndicator={false}>
+        {/* 🏖️ Hero Section */}
         <ImageBackground
           source={{
             uri:
@@ -158,6 +163,7 @@ export default function BeachDetails() {
           </View>
         </ImageBackground>
 
+        {/* 🌦️ Weather */}
         {weather && (
           <View style={styles.weatherCard}>
             <Text style={styles.sectionTitle}>Live Conditions</Text>
@@ -222,9 +228,12 @@ export default function BeachDetails() {
         </View>
       </ScrollView>
 
+      {/* 📤 Floating Upload Button */}
       <TouchableOpacity
         style={styles.uploadButton}
-        onPress={() => router.push(`/beach/upload?beachId=${Array.isArray(id) ? id[0] : id}`)}
+        onPress={() =>
+          router.push(`/beach/upload?beachId=${Array.isArray(id) ? id[0] : id}`)
+        }
       >
         <Feather name="upload" size={24} color="#fff" />
         <Text style={styles.uploadText}>Upload Video</Text>
@@ -234,10 +243,18 @@ export default function BeachDetails() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#f9fbfd" },
+  container: { flex: 1, backgroundColor: "#f9fbfd", paddingHorizontal: 20 },
   center: { flex: 1, justifyContent: "center", alignItems: "center" },
   text: { marginTop: 10, color: "#555" },
-  heroImage: { width, height: 280, justifyContent: "flex-end" },
+  heroImage: {
+    width: width - 40,
+    height: 280,
+    borderRadius: 20,
+    overflow: "hidden",
+    marginTop: 20,
+    alignSelf: "center",
+    justifyContent: "flex-end",
+  },
   gradient: { ...StyleSheet.absoluteFillObject },
   heroTextContainer: { paddingHorizontal: 20, paddingBottom: 30 },
   heroTitle: { color: "#fff", fontSize: 26, fontWeight: "bold" },
@@ -248,7 +265,6 @@ const styles = StyleSheet.create({
     backgroundColor: "#fff",
     borderRadius: 20,
     padding: 20,
-    marginHorizontal: 20,
     shadowColor: "#000",
     shadowOpacity: 0.1,
     shadowRadius: 6,
@@ -262,8 +278,13 @@ const styles = StyleSheet.create({
   },
   weatherRow: { flexDirection: "row", justifyContent: "space-between" },
   weatherBox: { alignItems: "center", flex: 1 },
-  weatherLabel: { fontSize: 14, color: "#333", marginTop: 5, textAlign: "center" },
-  videoSection: { marginTop: 30, marginBottom: 40, marginHorizontal: 20 },
+  weatherLabel: {
+    fontSize: 14,
+    color: "#333",
+    marginTop: 5,
+    textAlign: "center",
+  },
+  videoSection: { marginTop: 30, marginBottom: 40 },
   videoPlaceholder: {
     backgroundColor: "#fff",
     borderRadius: 16,
@@ -297,7 +318,7 @@ const styles = StyleSheet.create({
   uploadButton: {
     position: "absolute",
     bottom: 30,
-    right: 20,
+    right: 30,
     flexDirection: "row",
     alignItems: "center",
     backgroundColor: "#0077b6",
