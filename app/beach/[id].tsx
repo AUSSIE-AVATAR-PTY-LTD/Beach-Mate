@@ -15,7 +15,7 @@ import { supabase } from "../../lib/supabase";
 import { LinearGradient } from "expo-linear-gradient";
 import { Feather } from "@expo/vector-icons";
 import * as Font from "expo-font";
-import AppHeader from "../../components/AppHeader"; // ✅ Import header
+import AppHeader from "../../components/AppHeader";
 
 const { width } = Dimensions.get("window");
 
@@ -41,6 +41,11 @@ type Video = {
   caption: string | null;
   user_id: string;
   created_at: string;
+  users?: {
+    full_name?: string | null;
+    email?: string | null;
+    avatar_url?: string | null;
+  };
 };
 
 export default function BeachDetails() {
@@ -56,7 +61,6 @@ export default function BeachDetails() {
     (async () => {
       try {
         await Font.loadAsync(Feather.font);
-
         const beachId = Array.isArray(id) ? id[0] : id;
         if (!beachId) return;
 
@@ -81,19 +85,16 @@ export default function BeachDetails() {
           });
         }
 
-        // 🎥 Fetch approved videos
+        // 🎥 Fetch videos with uploader info
         const beachUUID = Array.isArray(id) ? id[0].trim() : (id ?? "").trim();
-        console.log("Querying videos for beach ID:", beachUUID);
-
         const { data: videoData, error: videoError } = await supabase
           .from("videos")
-          .select("*")
+          .select("*, users(full_name, email, avatar_url)")
           .eq("beach_id", beachUUID)
           .eq("approved", true)
           .order("created_at", { ascending: false });
 
         if (videoError) throw videoError;
-        console.log("Fetched videos:", videoData);
         setVideos(videoData || []);
       } catch (err) {
         console.error("Beach page error:", err);
@@ -119,6 +120,17 @@ export default function BeachDetails() {
     return map[code] || "Unknown";
   };
 
+  const formatDate = (iso: string) => {
+    const date = new Date(iso);
+    return date.toLocaleString("en-AU", {
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  };
+
   if (loading) {
     return (
       <View style={styles.center}>
@@ -142,7 +154,7 @@ export default function BeachDetails() {
       <AppHeader subtitle="Explore surf conditions & videos" />
 
       <ScrollView showsVerticalScrollIndicator={false}>
-        {/* 🏖️ Hero Section */}
+        {/* 🏖️ Hero */}
         <ImageBackground
           source={{
             uri:
@@ -202,33 +214,59 @@ export default function BeachDetails() {
               </Text>
             </View>
           ) : (
-            videos.map((v) => (
-              <TouchableOpacity
-                key={v.id}
-                style={styles.videoCard}
-                onPress={() => router.push(`/beach/video/${v.id}`)}
-              >
-                <Image
-                  source={{
-                    uri: v.thumbnail_url || "https://via.placeholder.com/400",
-                  }}
-                  style={styles.thumbnail}
-                />
-                <View style={styles.videoInfo}>
-                  <Text style={styles.caption}>
-                    {v.caption || "Surf vibes 🌊"}
-                  </Text>
-                  <Text style={styles.date}>
-                    {new Date(v.created_at).toLocaleDateString()}
-                  </Text>
-                </View>
-              </TouchableOpacity>
-            ))
+            videos.map((v) => {
+              const uploaderName =
+                v.users?.full_name || v.users?.email || "Unknown user";
+
+              return (
+                <TouchableOpacity
+                  key={v.id}
+                  style={styles.videoCard}
+                  onPress={() => router.push(`/beach/video/${v.id}`)}
+                >
+                  <Image
+                    source={{
+                      uri: v.thumbnail_url || "https://via.placeholder.com/400",
+                    }}
+                    style={styles.thumbnail}
+                  />
+
+                  <View style={styles.videoInfo}>
+                    <Text style={styles.caption}>
+                      {v.caption || "Surf vibes 🌊"}
+                    </Text>
+
+                    {/* Uploader Row */}
+                    <View style={styles.metaRow}>
+                      {v.users?.avatar_url ? (
+                        <Image
+                          source={{ uri: v.users.avatar_url }}
+                          style={styles.avatarSmall}
+                        />
+                      ) : (
+                        <Feather name="user" size={14} color="#0077b6" />
+                      )}
+                      <Text style={styles.metaText}>
+                        Uploaded by {uploaderName}
+                      </Text>
+                    </View>
+
+                    {/* Time Row */}
+                    <View style={styles.metaRow}>
+                      <Feather name="clock" size={14} color="#0077b6" />
+                      <Text style={styles.metaText}>
+                        {formatDate(v.created_at)}
+                      </Text>
+                    </View>
+                  </View>
+                </TouchableOpacity>
+              );
+            })
           )}
         </View>
       </ScrollView>
 
-      {/* 📤 Floating Upload Button */}
+      {/* 📤 Upload Button */}
       <TouchableOpacity
         style={styles.uploadButton}
         onPress={() =>
@@ -246,6 +284,7 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#f9fbfd", paddingHorizontal: 20 },
   center: { flex: 1, justifyContent: "center", alignItems: "center" },
   text: { marginTop: 10, color: "#555" },
+  error: { color: "red", fontSize: 16, textAlign: "center", marginTop: 20 },
   heroImage: {
     width: width - 40,
     height: 280,
@@ -278,12 +317,7 @@ const styles = StyleSheet.create({
   },
   weatherRow: { flexDirection: "row", justifyContent: "space-between" },
   weatherBox: { alignItems: "center", flex: 1 },
-  weatherLabel: {
-    fontSize: 14,
-    color: "#333",
-    marginTop: 5,
-    textAlign: "center",
-  },
+  weatherLabel: { fontSize: 14, color: "#333", marginTop: 5 },
   videoSection: { marginTop: 30, marginBottom: 40 },
   videoPlaceholder: {
     backgroundColor: "#fff",
@@ -296,7 +330,6 @@ const styles = StyleSheet.create({
     elevation: 4,
   },
   placeholderText: { color: "#999", marginTop: 10, fontSize: 14 },
-  error: { color: "red", fontSize: 16, textAlign: "center", padding: 20 },
   videoCard: {
     backgroundColor: "#fff",
     borderRadius: 16,
@@ -313,8 +346,15 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 16,
   },
   videoInfo: { padding: 12 },
-  caption: { color: "#333", fontSize: 15, fontWeight: "500" },
-  date: { color: "#888", fontSize: 12, marginTop: 4 },
+  caption: { color: "#333", fontSize: 15, fontWeight: "500", marginBottom: 6 },
+  metaRow: { flexDirection: "row", alignItems: "center", marginTop: 3 },
+  metaText: { color: "#555", fontSize: 13, marginLeft: 5 },
+  avatarSmall: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    marginRight: 5,
+  },
   uploadButton: {
     position: "absolute",
     bottom: 30,
